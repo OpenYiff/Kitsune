@@ -209,7 +209,11 @@ def import_posts(log_id, key, url = initial_api):
             columns = post_model.keys()
             data = ['%s'] * len(post_model.values())
             data[-1] = '%s::jsonb[]' # attachments
+<<<<<<< HEAD
             query = "INSERT INTO posts ({fields}) VALUES ({values})".format(
+=======
+            query = "INSERT INTO booru_posts ({fields}) VALUES ({values})".format(
+>>>>>>> Revert "Separate booru_posts into separate tables"
                 fields = ','.join(columns),
                 values = ','.join(data)
             )

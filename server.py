@@ -14,7 +14,6 @@ from os import makedirs
 import cloudscraper
 import requests
 import threading
-import config
 import uuid
 import re
 import logging
