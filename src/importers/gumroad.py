@@ -1,25 +1,22 @@
-import re
 import sys
+sys.setrecursionlimit(100000)
+
+import re
 import config
-import psycopg2
 import requests
 import cloudscraper
 import uuid
 import json
 import datetime
-
-sys.setrecursionlimit(100000)
-
 from bs4 import BeautifulSoup
-from indexer import index_artists
-from flag_check import check_for_flags
-from psycopg2.extras import RealDictCursor
-from download import download_file, DownloaderException
-from proxy import get_proxy
 from os.path import join
 from os import makedirs
 
-from ..internals.database.database import get_conn
+from ..internals.database.database import get_conn, return_conn
+from ..lib.artist import delete_artist_cache_keys, delete_all_artist_keys, index_artists
+from ..lib.post import delete_post_cache_keys, delete_all_post_cache_keys, remove_post_if_flagged_for_reimport
+from ..lib.download import download_file, DownloaderException
+from ..lib.proxy import get_proxy
 
 def import_posts(log_id, key, startFrom = 1):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
@@ -174,7 +171,7 @@ def import_posts(log_id, key, startFrom = 1):
         artist.delete_all_artist_keys()
         post.delete_all_post_cache_keys()
     
-    conn.close()
+    return_conn(conn)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:

@@ -1,3 +1,8 @@
+from bs4 import BeautifulSoup
+from proxy import get_proxy
+import cloudscraper
+import requests
+
 from ..internals.cache.redis import delete_keys, delete_wildcard_keys
 
 def delete_artist_cache_keys(service, artist_id):
@@ -24,3 +29,64 @@ def delete_all_artist_keys():
     ]
     
     delete_keys(keys)
+
+def index_artists():
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute('select "user", "service" from "posts" as "post" where not exists (select * from "lookup" where id = post.user) group by "user", "service"')
+    results = cursor.fetchall()
+
+    for post in results:
+        try:
+            if post["service"] == 'patreon':
+                scraper = cloudscraper.create_scraper()
+                user = scraper.get('https://www.patreon.com/api/user/' + post["user"], proxies=get_proxy()).json()
+                model = {
+                    "id": post["user"],
+                    "name": user["data"]["attributes"]["vanity"] or user["data"]["attributes"]["full_name"],
+                    "service": "patreon"
+                }
+            elif post["service"] == 'fanbox':
+                user = requests.get('https://api.fanbox.cc/creator.get?userId=' + post["user"], proxies=get_proxy(), headers={"origin":"https://fanbox.cc"}).json()
+                model = {
+                    "id": post["user"],
+                    "name": user["body"]["creatorId"],
+                    "service": "fanbox"
+                }
+            elif post["service"] == 'gumroad':
+                resp = requests.get('https://gumroad.com/' + post["user"], proxies=get_proxy()).text
+                soup = BeautifulSoup(resp, 'html.parser')
+                model = {
+                    "id": post["user"],
+                    "name": soup.find('h2', class_='creator-profile-card__name js-creator-name').string.replace("\n", ""),
+                    "service": "gumroad"
+                }
+            elif post["service"] == 'subscribestar':
+                resp = requests.get('https://subscribestar.adult/' + post["user"], proxies=get_proxy()).text
+                soup = BeautifulSoup(resp, 'html.parser')
+                model = {
+                    "id": post["user"],
+                    "name": soup.find('div', class_='profile_main_info-name').string,
+                    "service": "subscribestar"
+                }
+            elif post["service"] == 'dlsite':
+                resp = requests.get('https://www.dlsite.com/eng/circle/profile/=/maker_id/' + post["user"], proxies=get_proxy()).text
+                soup = BeautifulSoup(resp, 'html.parser')
+                model = {
+                    "id": post["user"],
+                    "name": soup.find('strong', class_='prof_maker_name').string,
+                    "service": "dlsite"
+                }
+
+            columns = model.keys()
+            values = ['%s'] * len(model.values())
+            query = "INSERT INTO lookup ({fields}) VALUES ({values})".format(
+                fields = ','.join(columns),
+                values = ','.join(values)
+            )
+            cursor.execute(query, list(model.values()))
+            conn.commit()
+        except Exception as e:
+            print(f"Error while indexing user {post['user']}: {e}")
+
+    return_conn(conn)

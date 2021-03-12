@@ -1,27 +1,21 @@
 import sys
-import psycopg2
 import datetime
 import config
 import json
 import uuid
-import logging
-
-from indexer import index_artists
+from os import makedirs
+from os.path import join
 from gallery_dl import job
 from gallery_dl import config as dlconfig
 from gallery_dl.extractor.message import Message
-from psycopg2.extras import RealDictCursor
-from download import download_file, DownloaderException
-from flag_check import check_for_flags
-from proxy import get_proxy
 from io import StringIO
 from html.parser import HTMLParser
-from os import makedirs
-from os.path import join
 
-from ..internals.database.database import get_conn
-from ..lib.artist import delete_artist_cache_keys
-from ..lib.post import delete_post_cache_keys
+from ..internals.database.database import get_conn, return_conn
+from ..lib.artist import delete_artist_cache_keys, delete_all_artist_keys, index_artists
+from ..lib.post import delete_post_cache_keys, delete_all_post_cache_keys, remove_post_if_flagged_for_reimport
+from ..lib.download import download_file, DownloaderException
+from ..lib.proxy import get_proxy
 
 class MLStripper(HTMLParser):
     def __init__(self):
@@ -74,11 +68,7 @@ def import_posts(log_id, key):
                     print(f"Skipping ID {post['post_id']}: user {user_id} is banned")
                     continue
                 
-                check_for_flags(
-                    'subscribestar',
-                    user_id,
-                    post_id
-                )
+                remove_post_if_flagged_for_reimport('subscribestar', user_id, post_id)
 
                 cursor2 = conn.cursor()
                 cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'subscribestar'", (post_id,))
@@ -152,7 +142,7 @@ def import_posts(log_id, key):
             conn.rollback()
             continue
     
-    conn.close()
+    return_conn(conn)
     print('Finished scanning for posts.')
     index_artists()
 

@@ -24,3 +24,6 @@ def get_pool():
 
 def get_conn():
     return pool.getconn()
+
+def return_conn(conn):
+    pool.putconn(conn)

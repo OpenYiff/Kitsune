@@ -2,7 +2,8 @@ import sys
 sys.path.append('./PixivUtil2')
 sys.setrecursionlimit(100000)
 
-import psycopg2
+from os import makedirs
+from os.path import join
 import requests
 import datetime
 import config
@@ -10,16 +11,13 @@ import json
 import logging
 import uuid
 
-from indexer import index_artists
-from psycopg2.extras import RealDictCursor
-from PixivUtil2.PixivModelFanbox import FanboxArtist, FanboxPost
-from proxy import get_proxy
-from download import download_file, DownloaderException
-from flag_check import check_for_flags
-from os import makedirs
-from os.path import join
+from ...PixivUtil2.PixivModelFanbox import FanboxArtist, FanboxPost
 
-from ..internals.database.database import get_conn
+from ..internals.database.database import get_conn, return_conn
+from ..lib.artist import delete_artist_cache_keys, delete_all_artist_keys, index_artists
+from ..lib.post import delete_post_cache_keys, delete_all_post_cache_keys, remove_post_if_flagged_for_reimport
+from ..lib.proxy import get_proxy
+from ..lib.download import download_file, DownloaderException
 
 def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?limit=50'):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
@@ -61,11 +59,7 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
                     print(f"Skipping ID {post_id}: user {user_id} is banned")
                     continue
                 
-                check_for_flags(
-                    'fanbox',
-                    user_id,
-                    post_id
-                )
+                remove_post_if_flagged_for_reimport('fanbox', user_id, post_id)
 
                 cursor2 = conn.cursor()
                 cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'fanbox'", (post_id,))
@@ -151,7 +145,7 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
             artist.delete_all_artist_keys()
             post.delete_all_post_cache_keys()
     
-    conn.close()
+    return_conn(conn)
     
 if __name__ == '__main__':
     if len(sys.argv) > 1:
