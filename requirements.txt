@@ -33,3 +33,5 @@ urllib3==1.26.2
 webencodings==0.5.1
 Werkzeug==1.0.1
 wrapt==1.12.1
+yoyo-migrations==7.2.1
+redis==3.5.3

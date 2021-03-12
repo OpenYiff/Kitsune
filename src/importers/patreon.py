@@ -21,6 +21,8 @@ from gallery_dl import text
 from flag_check import check_for_flags
 from proxy import get_proxy
 
+from ..internals.database.database import get_conn
+
 initial_api = 'https://www.patreon.com/api/stream' + '?include=' + ','.join([
     'user',
     'images',
@@ -76,13 +78,7 @@ def import_posts(log_id, key, url = initial_api):
     sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
     # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
 
-    conn = psycopg2.connect(
-        host = config.database_host,
-        dbname = config.database_dbname,
-        user = config.database_user,
-        password = config.database_password,
-        cursor_factory = RealDictCursor
-    )
+    conn = get_conn()
 
     try:
         scraper = cloudscraper.create_scraper().get(url, cookies = { 'session_id': key }, proxies=get_proxy())
@@ -102,7 +98,7 @@ def import_posts(log_id, key, url = initial_api):
             bans = cursor1.fetchall()
             if len(bans) > 0:
                 print(f"Skipping ID {post['id']}: user {post['relationships']['user']['data']['id']} is banned")
-                continue
+                return
             
             check_for_flags(
                 'patreon',
@@ -112,8 +108,8 @@ def import_posts(log_id, key, url = initial_api):
 
             cursor2 = conn.cursor()
             cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'patreon'", (post['id'],))
-            existing_posts = cursor2.fetchall()
-            if len(existing_posts) > 0:
+            existing_post = cursor2.fetchall()
+            if len(existing_post) > 0:
                 continue
 
             print(f"Starting import: {post['id']}")
@@ -233,6 +229,8 @@ def import_posts(log_id, key, url = initial_api):
         print('Finished scanning for posts.')
         print('No posts detected? You either entered your session key incorrectly, or are not subscribed to any artists.')
         index_artists()
+
+    
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:

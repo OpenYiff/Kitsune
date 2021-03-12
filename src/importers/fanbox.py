@@ -18,18 +18,15 @@ from download import download_file, DownloaderException
 from flag_check import check_for_flags
 from os import makedirs
 from os.path import join
+
+from ..internals.database.database import get_conn
+
 def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?limit=50'):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
     sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
     # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
 
-    conn = psycopg2.connect(
-        host = config.database_host,
-        dbname = config.database_dbname,
-        user = config.database_user,
-        password = config.database_password,
-        cursor_factory = RealDictCursor
-    )
+    conn = get_conn()
 
     try:
         scraper = requests.get(

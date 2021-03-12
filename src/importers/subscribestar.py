@@ -19,6 +19,10 @@ from html.parser import HTMLParser
 from os import makedirs
 from os.path import join
 
+from ..internals.database.database import get_conn
+from ..lib.artist import delete_artist_cache_keys
+from ..lib.post import delete_post_cache_keys
+
 class MLStripper(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -41,13 +45,7 @@ def import_posts(log_id, key):
     sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
     # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
 
-    conn = psycopg2.connect(
-        host = config.database_host,
-        dbname = config.database_dbname,
-        user = config.database_user,
-        password = config.database_password,
-        cursor_factory = RealDictCursor
-    )
+    conn = get_conn()
 
     dlconfig.set(('output'), "mode", "null")
     dlconfig.set(('extractor', 'subscribestar'), "cookies", {
@@ -141,6 +139,9 @@ def import_posts(log_id, key):
                 cursor3 = conn.cursor()
                 cursor3.execute(query, list(post_model.values()))
                 conn.commit()
+
+                delete_post_cache_keys
+
                 print(f"Finished importing {post['post_id']}!")
         except Exception as e:
             print(f"Error while importing: {e}")

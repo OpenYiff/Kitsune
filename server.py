@@ -1,9 +1,5 @@
 from flask import Flask, request, redirect
 from indexer import index_artists
-import patreon_importer
-import fanbox_importer
-import subscribestar_importer
-import gumroad_importer
 from bs4 import BeautifulSoup
 from yoyo import read_migrations
 from yoyo import get_backend
@@ -19,6 +15,13 @@ import re
 import logging
 import uwsgi
 
+import src.internals.database.database
+import src.internals.cache.redis
+import src.importers.patreon
+import src.importers.fanbox
+import src.importers.subscribestar
+import src.importers.gumroad
+
 app = Flask(__name__)
 
 logging.basicConfig(filename='kemono.log', level=logging.DEBUG)
@@ -30,6 +33,9 @@ if uwsgi.worker_id() == 0:
         backend.apply_migrations(backend.to_apply(migrations))
     index_artists()
 
+database.init()
+redis.init()
+
 class FanboxIconException(Exception):
     pass
 
@@ -39,16 +45,16 @@ def import_api():
     if not request.args.get('session_key'):
         return "", 401
     if request.args.get('service') == 'patreon':
-        th = threading.Thread(target=patreon_importer.import_posts, args=(log_id, request.args.get('session_key')))
+        th = threading.Thread(target=patreon.import_posts, args=(log_id, request.args.get('session_key')))
         th.start()
     elif request.args.get('service') == 'fanbox':
-        th = threading.Thread(target=fanbox_importer.import_posts, args=(log_id, request.args.get('session_key')))
+        th = threading.Thread(target=fanbox.import_posts, args=(log_id, request.args.get('session_key')))
         th.start()
     elif request.args.get('service') == 'subscribestar':
-        th = threading.Thread(target=subscribestar_importer.import_posts, args=(log_id, request.args.get('session_key')))
+        th = threading.Thread(target=subscribestar.import_posts, args=(log_id, request.args.get('session_key')))
         th.start()
     elif request.args.get('service') == 'gumroad':
-        th = threading.Thread(target=gumroad_importer.import_posts, args=(log_id, request.args.get('session_key')))
+        th = threading.Thread(target=gumroad.import_posts, args=(log_id, request.args.get('session_key')))
         th.start()
     return log_id, 200
 
