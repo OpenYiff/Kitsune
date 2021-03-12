@@ -55,29 +55,33 @@ def import_posts(log_id, key):
     j = job.DataJob("https://subscribestar.adult/feed") 
     j.run()
     
+    user_id = None
+
     for message in j.data:
         try:
             if message[0] == Message.Directory:
                 post = message[-1]
 
-                file_directory = f"files/subscribestar/{post['author_name']}/{post['post_id']}"
-                attachments_directory = f"attachments/subscribestar/{post['author_name']}/{post['post_id']}"
+                user_id = post['author_name']
+                post_id = str(post['post_id'])
+                file_directory = f"files/subscribestar/{user_id}/{post['post_id']}"
+                attachments_directory = f"attachments/subscribestar/{user_id}/{post['post_id']}"
                 
                 cursor1 = conn.cursor()
-                cursor1.execute("SELECT * FROM dnp WHERE id = %s AND service = 'subscribestar'", (post['author_name'],))
+                cursor1.execute("SELECT * FROM dnp WHERE id = %s AND service = 'subscribestar'", (user_id,))
                 bans = cursor1.fetchall()
                 if len(bans) > 0:
-                    print(f"Skipping ID {post['post_id']}: user {post['author_name']} is banned")
+                    print(f"Skipping ID {post['post_id']}: user {user_id} is banned")
                     continue
                 
                 check_for_flags(
                     'subscribestar',
-                    post['author_name'],
-                    str(post['post_id'])
+                    user_id,
+                    post_id
                 )
 
                 cursor2 = conn.cursor()
-                cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'subscribestar'", (str(post['post_id']),))
+                cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'subscribestar'", (post_id,))
                 existing_posts = cursor2.fetchall()
                 if len(existing_posts) > 0:
                     continue
@@ -86,8 +90,8 @@ def import_posts(log_id, key):
                 
                 stripped_content = strip_tags(post['content'])
                 post_model = {
-                    'id': str(post['post_id']),
-                    '"user"': post['author_name'],
+                    'id': post_id,
+                    '"user"': user_id,
                     'service': 'subscribestar',
                     'title': (stripped_content[:60] + '..') if len(stripped_content) > 60 else stripped_content,
                     'content': post['content'],
@@ -140,7 +144,7 @@ def import_posts(log_id, key):
                 cursor3.execute(query, list(post_model.values()))
                 conn.commit()
 
-                delete_post_cache_keys
+                post.delete_post_cache_keys('subscribestar', user_id, post_id)
 
                 print(f"Finished importing {post['post_id']}!")
         except Exception as e:
@@ -151,6 +155,11 @@ def import_posts(log_id, key):
     conn.close()
     print('Finished scanning for posts.')
     index_artists()
+
+    if user_id is not None:
+        artist.delete_artist_cache_keys('subscribestar', user_id)
+    artist.delete_all_artist_keys()
+    post.delete_all_post_cache_keys()
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:

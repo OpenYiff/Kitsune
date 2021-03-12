@@ -46,6 +46,8 @@ def import_posts(log_id, key, startFrom = 1):
     soup = BeautifulSoup(scraper_data['products_html'], 'html.parser')
     products = soup.find_all(class_='product-card')
 	
+    user_id = None
+
     for product in products:
         post_id = product['data-permalink']
         purchase_id = product.find(class_='js-product')['data-purchase-id']
@@ -156,6 +158,9 @@ def import_posts(log_id, key, startFrom = 1):
         cursor3 = conn.cursor()
         cursor3.execute(query, list(post_model.values()))
         conn.commit()
+
+        post.delete_post_cache_keys('gumroad', user_id, post_id)
+
         print(f"Finished importing {post_id}!")
 
     if len(products):
@@ -163,6 +168,11 @@ def import_posts(log_id, key, startFrom = 1):
     else:
         print('Finished scanning for posts.')
         index_artists()
+
+        if user_id is not None:
+                artist.delete_artist_cache_keys('gumroad', user_id)
+        artist.delete_all_artist_keys()
+        post.delete_all_post_cache_keys()
     
     conn.close()
 

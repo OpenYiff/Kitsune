@@ -40,39 +40,44 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
         print(f'Error: Status code {scraper.status_code} when contacting Patreon API.')
         return
 
+    user_id = None
+
     if scraper_data.get('body'):
         for post in scraper_data['body']['items']:
-            parsed_post = FanboxPost(post['id'], None, post)
+            user_id = post['user']['userId']
+            post_id = post['id']
+
+            parsed_post = FanboxPost(post_id, None, post)
             if parsed_post.is_restricted:
                 continue
             try:
-                file_directory = f"files/fanbox/{post['user']['userId']}/{post['id']}"
-                attachments_directory = f"attachments/fanbox/{post['user']['userId']}/{post['id']}"
+                file_directory = f"files/fanbox/{user_id}/{post_id}"
+                attachments_directory = f"attachments/fanbox/{user_id}/{post_id}"
 
                 cursor1 = conn.cursor()
-                cursor1.execute("SELECT * FROM dnp WHERE id = %s AND service = 'fanbox'", (post['user']['userId'],))
+                cursor1.execute("SELECT * FROM dnp WHERE id = %s AND service = 'fanbox'", (user_id,))
                 bans = cursor1.fetchall()
                 if len(bans) > 0:
-                    print(f"Skipping ID {post['id']}: user {post['user']['userId']} is banned")
+                    print(f"Skipping ID {post_id}: user {user_id} is banned")
                     continue
                 
                 check_for_flags(
                     'fanbox',
-                    post['user']['userId'],
-                    post['id']
+                    user_id,
+                    post_id
                 )
 
                 cursor2 = conn.cursor()
-                cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'fanbox'", (post['id'],))
+                cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'fanbox'", (post_id,))
                 existing_posts = cursor2.fetchall()
                 if len(existing_posts) > 0:
                     continue
 
-                print(f"Starting import: {post['id']}")
+                print(f"Starting import: {post_id}")
 
                 post_model = {
-                    'id': post['id'],
-                    '"user"': post['user']['userId'],
+                    'id': post_id,
+                    '"user"': user_id,
                     'service': 'fanbox',
                     'title': post['title'],
                     'content': parsed_post.body_text,
@@ -126,9 +131,12 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
                 cursor3 = conn.cursor()
                 cursor3.execute(query, list(post_model.values()))
                 conn.commit()
-                print(f"Finished importing {post['id']}!")
+
+                post.delete_post_cache_keys('fanbox', user_id, post_id)
+
+                print(f"Finished importing {post_id}!")
             except Exception as e:
-                print(f"Error while importing {post['id']}: {e}")
+                print(f"Error while importing {post_id}: {e}")
                 conn.rollback()
                 continue
         
@@ -137,6 +145,11 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
         else:
             print('Finished scanning for posts.')
             index_artists()
+
+            if user_id is not None:
+                artist.delete_artist_cache_keys('fanbox', user_id)
+            artist.delete_all_artist_keys()
+            post.delete_all_post_cache_keys()
     
     conn.close()
     
