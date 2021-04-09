@@ -16,8 +16,8 @@ def delete_keys(keys):
     for key in keys:
         conn.delete(key)
 
-def delete_wildcard_keys(wildcards):
-    conn = get_redis()
-    for wildcard in wildcards:
-        keys = conn.keys(pattern=wildcard)
-        delete_keys(keys)
+def delete_keys_pattern(pattern):
+    redis = get_conn()
+    keys = redis.keys(pattern)
+    redis.delete(*keys)
+

@@ -36,9 +36,6 @@ def strip_tags(html):
 
 def import_posts(log_id, key):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
-    sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-    # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-
     conn = get_conn()
 
     dlconfig.set(('output'), "mode", "null")
@@ -122,11 +119,7 @@ def import_posts(log_id, key):
                 columns = post_model.keys()
                 data = ['%s'] * len(post_model.values())
                 data[-1] = '%s::jsonb[]' # attachments
-<<<<<<< HEAD
                 query = "INSERT INTO posts ({fields}) VALUES ({values})".format(
-=======
-                query = "INSERT INTO booru_posts ({fields}) VALUES ({values})".format(
->>>>>>> Revert "Separate booru_posts into separate tables"
                     fields = ','.join(columns),
                     values = ','.join(data)
                 )

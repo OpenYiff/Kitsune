@@ -1,5 +1,5 @@
 from ..internals.cache.redis import delete_keys
-from ..intenrals.database.database import get_conn, return_conn
+from ..intenrals.database.database import get_cursor
 
 def delete_post_cache_keys(service, artist_id, post_id):
     keys = [
@@ -13,9 +13,13 @@ def delete_all_post_cache_keys():
 
     delete_keys(keys)
 
+def post_exists(service, artist_id, post_id):
+    cursor = get_cursor()
+    cursor.execute("SELECT * FROM posts WHERE id = %s AND service = 'fanbox'", (post_id,))
+    existing_posts = cursor.fetchall()
+
 def remove_post_if_flagged_for_reimport(service, user, post):
-    conn = get_conn()
-    cursor = conn.cursor()
+    cursor = get_cursor()
 
     cursor.execute('SELECT * FROM booru_flags WHERE service = %s AND "user" = %s AND id = %s', (service, user, post))
     existing_flags = cursor.fetchall()
@@ -39,5 +43,3 @@ def remove_post_if_flagged_for_reimport(service, user, post):
         user,
         post
     ), ignore_errors=True)
-
-    return_conn(conn)

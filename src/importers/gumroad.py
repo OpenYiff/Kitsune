@@ -20,9 +20,6 @@ from ..lib.proxy import get_proxy
 
 def import_posts(log_id, key, startFrom = 1):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
-    sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-    # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-
     conn = get_conn()
 
     try:

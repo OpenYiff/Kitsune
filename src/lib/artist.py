@@ -3,7 +3,8 @@ from proxy import get_proxy
 import cloudscraper
 import requests
 
-from ..internals.cache.redis import delete_keys, delete_wildcard_keys
+from ..internals.cache.redis import delete_keys, delete_keys_pattern
+from ..internals.database.database import get_cursor
 
 def delete_artist_cache_keys(service, artist_id):
     artist_id = str(artist_id)
@@ -20,7 +21,7 @@ def delete_artist_cache_keys(service, artist_id):
     ]
 
     delete_keys(keys)
-    delete_wildcard_keys(wildcard_keys)
+    delete_keys_pattern(wildcard_keys)
 
 def delete_all_artist_keys():
     keys = [
@@ -29,6 +30,11 @@ def delete_all_artist_keys():
     ]
     
     delete_keys(keys)
+
+def is_artist_dnp(artist_id):
+    cursor = get_cursor
+    cursor.execute("SELECT * FROM dnp WHERE id = %s AND service = 'fanbox'", (user_id,))
+    return len(cursor.fetchall()) > 0
 
 def index_artists():
     conn = get_conn()

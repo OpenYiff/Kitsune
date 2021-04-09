@@ -11,20 +11,19 @@ import json
 import logging
 import uuid
 
+from flask import current_app
+
 from ...PixivUtil2.PixivModelFanbox import FanboxArtist, FanboxPost
 
-from ..internals.database.database import get_conn, return_conn
-from ..lib.artist import delete_artist_cache_keys, delete_all_artist_keys, index_artists
-from ..lib.post import delete_post_cache_keys, delete_all_post_cache_keys, remove_post_if_flagged_for_reimport
+from ..internals.database.database import get_conn
+from ..lib.artist import delete_artist_cache_keys, delete_all_artist_keys, index_artists, is_artist_dnp
+from ..lib.post import delete_post_cache_keys, delete_all_post_cache_keys, remove_post_if_flagged_for_reimport, post_exists
 from ..lib.proxy import get_proxy
 from ..lib.download import download_file, DownloaderException
+from ..internals.utils.utils import get_import_id
 
-def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?limit=50'):
+def import_posts(import_id, key, url = 'https://api.fanbox.cc/post.listSupporting?limit=50'):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
-    sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-    # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-
-    conn = get_conn()
 
     try:
         scraper = requests.get(
@@ -35,11 +34,13 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
         )
         scraper_data = scraper.json()
     except requests.HTTPError:
-        print(f'Error: Status code {scraper.status_code} when contacting Patreon API.')
+        current_app.logger.exception(f'[{import_id}]: HTTP error when contacting Fanbox API ({url}). Stopping import.')
         return
 
+    conn = get_conn()
     user_id = None
-
+    posts_imported = []
+    artists_with_posts_imported = []
     if scraper_data.get('body'):
         for post in scraper_data['body']['items']:
             user_id = post['user']['userId']
@@ -47,27 +48,23 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
 
             parsed_post = FanboxPost(post_id, None, post)
             if parsed_post.is_restricted:
+                current_app.logger.debug(f'[{import_id}]: Skipping post {post_id} from user {user_id} because restricted')
                 continue
             try:
                 file_directory = f"files/fanbox/{user_id}/{post_id}"
                 attachments_directory = f"attachments/fanbox/{user_id}/{post_id}"
 
-                cursor1 = conn.cursor()
-                cursor1.execute("SELECT * FROM dnp WHERE id = %s AND service = 'fanbox'", (user_id,))
-                bans = cursor1.fetchall()
-                if len(bans) > 0:
-                    print(f"Skipping ID {post_id}: user {user_id} is banned")
+                if is_artist_dnp(user_id):
+                    current_app.logger.debug(f"[{import_id}]: Skipping post {post_id} from user {user_id} is in do not post list")
                     continue
-                
+
                 remove_post_if_flagged_for_reimport('fanbox', user_id, post_id)
 
-                cursor2 = conn.cursor()
-                cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'fanbox'", (post_id,))
-                existing_posts = cursor2.fetchall()
-                if len(existing_posts) > 0:
+                if post_exists('fanbox', user_id, post_id):
+                    current_app.logger.debug(f'[{import_id}]: Skipping post {post_id} from user {user_id} because already exists')
                     continue
 
-                print(f"Starting import: {post_id}")
+                current_app.logger.debug(f"[{import_id}]: Starting import: {post_id}")
 
                 post_model = {
                     'id': post_id,
@@ -114,41 +111,41 @@ def import_posts(log_id, key, url = 'https://api.fanbox.cc/post.listSupporting?l
                 columns = post_model.keys()
                 data = ['%s'] * len(post_model.values())
                 data[-1] = '%s::jsonb[]' # attachments
-<<<<<<< HEAD
                 query = "INSERT INTO posts ({fields}) VALUES ({values})".format(
-=======
-                query = "INSERT INTO booru_posts ({fields}) VALUES ({values})".format(
->>>>>>> Revert "Separate booru_posts into separate tables"
                     fields = ','.join(columns),
                     values = ','.join(data)
                 )
-                cursor3 = conn.cursor()
-                cursor3.execute(query, list(post_model.values()))
+                cursor = conn.cursor()
+                cursor.execute(query, list(post_model.values()))
                 conn.commit()
 
-                post.delete_post_cache_keys('fanbox', user_id, post_id)
+                delete_post_cache_keys('fanbox', user_id, post_id)
 
-                print(f"Finished importing {post_id}!")
+                current_app.logger.debug(f'[{import_id}]: Finished importing {post_id} for user {user_id}')
             except Exception as e:
-                print(f"Error while importing {post_id}: {e}")
+                current_app.logger.exception(f'[{import_id}]: Error importing post {post_id} from user {user_id}')
                 conn.rollback()
                 continue
         
-        if scraper_data['body'].get('nextUrl'):
-            import_posts(log_id, key, scraper_data['body']['nextUrl'])
+        next_url = scraper_data['body'].get('nextUrl')
+        if next_url:
+            current_app.logger.debug(f'[{import_id}]: Finished processing page ({url}). Importing {next_url}')
+            import_posts(log_id, key, next_url)
         else:
-            print('Finished scanning for posts.')
+            current_app.logger.debug(current_app.logger.debug(f'[{import_id}]: Finished scanning for posts')
             index_artists()
 
-            if user_id is not None:
-                artist.delete_artist_cache_keys('fanbox', user_id)
-            artist.delete_all_artist_keys()
-            post.delete_all_post_cache_keys()
-    
-    return_conn(conn)
-    
+            for artist_id in artists_with_posts_imported:
+                artist.flush_cache_keys('fanbox', artist_id)
+            artist.flush_keys_after_import()
+            for (artist_id, post_id) in posts_imported:
+                post.flush_cache_keys('fanbox', artist_id, post_id)
+            post.flush_keys_after_import()
+
 if __name__ == '__main__':
     if len(sys.argv) > 1:
-        import_posts(str(uuid.uuid4()), sys.argv[1])
+        key = sys.argv[1]
+        import_id = get_import_id(key)
+        import_posts(import_id, sys.argv[1])
     else:
         print('Argument required - Login token')
