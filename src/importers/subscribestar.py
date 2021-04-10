@@ -1,23 +1,21 @@
 import sys
-import psycopg2
 import datetime
 import config
 import json
 import uuid
-import logging
-
-from indexer import index_artists
+from os import makedirs
+from os.path import join
 from gallery_dl import job
 from gallery_dl import config as dlconfig
 from gallery_dl.extractor.message import Message
-from psycopg2.extras import RealDictCursor
-from download import download_file, DownloaderException
-from flag_check import check_for_flags
-from proxy import get_proxy
 from io import StringIO
 from html.parser import HTMLParser
-from os import makedirs
-from os.path import join
+
+from ..internals.database.database import get_conn, return_conn
+from ..lib.artist import delete_artist_cache_keys, delete_all_artist_keys, index_artists
+from ..lib.post import delete_post_cache_keys, delete_all_post_cache_keys, remove_post_if_flagged_for_reimport
+from ..lib.download import download_file, DownloaderException
+from ..lib.proxy import get_proxy
 
 class MLStripper(HTMLParser):
     def __init__(self):
@@ -38,16 +36,7 @@ def strip_tags(html):
 
 def import_posts(log_id, key):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
-    sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-    # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-
-    conn = psycopg2.connect(
-        host = config.database_host,
-        dbname = config.database_dbname,
-        user = config.database_user,
-        password = config.database_password,
-        cursor_factory = RealDictCursor
-    )
+    conn = get_conn()
 
     dlconfig.set(('output'), "mode", "null")
     dlconfig.set(('extractor', 'subscribestar'), "cookies", {
@@ -57,29 +46,29 @@ def import_posts(log_id, key):
     j = job.DataJob("https://subscribestar.adult/feed") 
     j.run()
     
+    user_id = None
+
     for message in j.data:
         try:
             if message[0] == Message.Directory:
                 post = message[-1]
 
-                file_directory = f"files/subscribestar/{post['author_name']}/{post['post_id']}"
-                attachments_directory = f"attachments/subscribestar/{post['author_name']}/{post['post_id']}"
+                user_id = post['author_name']
+                post_id = str(post['post_id'])
+                file_directory = f"files/subscribestar/{user_id}/{post['post_id']}"
+                attachments_directory = f"attachments/subscribestar/{user_id}/{post['post_id']}"
                 
                 cursor1 = conn.cursor()
-                cursor1.execute("SELECT * FROM dnp WHERE id = %s AND service = 'subscribestar'", (post['author_name'],))
+                cursor1.execute("SELECT * FROM dnp WHERE id = %s AND service = 'subscribestar'", (user_id,))
                 bans = cursor1.fetchall()
                 if len(bans) > 0:
-                    print(f"Skipping ID {post['post_id']}: user {post['author_name']} is banned")
+                    print(f"Skipping ID {post['post_id']}: user {user_id} is banned")
                     continue
                 
-                check_for_flags(
-                    'subscribestar',
-                    post['author_name'],
-                    str(post['post_id'])
-                )
+                remove_post_if_flagged_for_reimport('subscribestar', user_id, post_id)
 
                 cursor2 = conn.cursor()
-                cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'subscribestar'", (str(post['post_id']),))
+                cursor2.execute("SELECT * FROM posts WHERE id = %s AND service = 'subscribestar'", (post_id,))
                 existing_posts = cursor2.fetchall()
                 if len(existing_posts) > 0:
                     continue
@@ -88,8 +77,8 @@ def import_posts(log_id, key):
                 
                 stripped_content = strip_tags(post['content'])
                 post_model = {
-                    'id': str(post['post_id']),
-                    '"user"': post['author_name'],
+                    'id': post_id,
+                    '"user"': user_id,
                     'service': 'subscribestar',
                     'title': (stripped_content[:60] + '..') if len(stripped_content) > 60 else stripped_content,
                     'content': post['content'],
@@ -137,15 +126,23 @@ def import_posts(log_id, key):
                 cursor3 = conn.cursor()
                 cursor3.execute(query, list(post_model.values()))
                 conn.commit()
+
+                post.delete_post_cache_keys('subscribestar', user_id, post_id)
+
                 print(f"Finished importing {post['post_id']}!")
         except Exception as e:
             print(f"Error while importing: {e}")
             conn.rollback()
             continue
     
-    conn.close()
+    return_conn(conn)
     print('Finished scanning for posts.')
     index_artists()
+
+    if user_id is not None:
+        artist.delete_artist_cache_keys('subscribestar', user_id)
+    artist.delete_all_artist_keys()
+    post.delete_all_post_cache_keys()
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:

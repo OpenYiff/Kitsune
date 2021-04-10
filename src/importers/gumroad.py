@@ -1,36 +1,26 @@
-import re
 import sys
+sys.setrecursionlimit(100000)
+
+import re
 import config
-import psycopg2
 import requests
 import cloudscraper
 import uuid
 import json
 import datetime
-
-sys.setrecursionlimit(100000)
-
 from bs4 import BeautifulSoup
-from indexer import index_artists
-from flag_check import check_for_flags
-from psycopg2.extras import RealDictCursor
-from download import download_file, DownloaderException
-from proxy import get_proxy
 from os.path import join
 from os import makedirs
 
+from ..internals.database.database import get_conn, return_conn
+from ..lib.artist import delete_artist_cache_keys, delete_all_artist_keys, index_artists
+from ..lib.post import delete_post_cache_keys, delete_all_post_cache_keys, remove_post_if_flagged_for_reimport
+from ..lib.download import download_file, DownloaderException
+from ..lib.proxy import get_proxy
+
 def import_posts(log_id, key, startFrom = 1):
     makedirs(join(config.download_path, 'logs'), exist_ok=True)
-    sys.stdout = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-    # sys.stderr = open(join(config.download_path, 'logs', f'{log_id}.log'), 'a')
-
-    conn = psycopg2.connect(
-        host = config.database_host,
-        dbname = config.database_dbname,
-        user = config.database_user,
-        password = config.database_password,
-        cursor_factory = RealDictCursor
-    )
+    conn = get_conn()
 
     try:
         scraper = cloudscraper.create_scraper().get(
@@ -50,6 +40,8 @@ def import_posts(log_id, key, startFrom = 1):
     soup = BeautifulSoup(scraper_data['products_html'], 'html.parser')
     products = soup.find_all(class_='product-card')
 	
+    user_id = None
+
     for product in products:
         post_id = product['data-permalink']
         purchase_id = product.find(class_='js-product')['data-purchase-id']
@@ -160,6 +152,9 @@ def import_posts(log_id, key, startFrom = 1):
         cursor3 = conn.cursor()
         cursor3.execute(query, list(post_model.values()))
         conn.commit()
+
+        post.delete_post_cache_keys('gumroad', user_id, post_id)
+
         print(f"Finished importing {post_id}!")
 
     if len(products):
@@ -167,8 +162,13 @@ def import_posts(log_id, key, startFrom = 1):
     else:
         print('Finished scanning for posts.')
         index_artists()
+
+        if user_id is not None:
+                artist.delete_artist_cache_keys('gumroad', user_id)
+        artist.delete_all_artist_keys()
+        post.delete_all_post_cache_keys()
     
-    conn.close()
+    return_conn(conn)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
